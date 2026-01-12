@@ -9,6 +9,7 @@ const App: React.FC = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [storageMode, setStorageMode] = useState<'cloud' | 'local'>('local');
+  const [isConnecting, setIsConnecting] = useState(true);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -26,36 +27,44 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    const initializeApp = async () => {
-      try {
-        const response = await fetch('/api/contacts', { 
-          signal: AbortSignal.timeout(3000) 
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setContacts(data);
-          setStorageMode('cloud');
-        } else {
-          throw new Error();
-        }
-      } catch (error) {
-        setContacts(loadLocalData());
-        setStorageMode('local');
-      } finally {
-        setIsLoading(false);
+  const initializeApp = async () => {
+    setIsConnecting(true);
+    try {
+      // Am mărit timeout-ul la 15 secunde pentru a permite pornirea serverului pe Render tier gratuit
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const response = await fetch('/api/contacts', { 
+        signal: controller.signal 
+      });
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setContacts(data);
+        setStorageMode('cloud');
+      } else {
+        throw new Error('Serverul a răspuns cu eroare');
       }
-    };
-
-    initializeApp();
-  }, [loadLocalData]);
+    } catch (error) {
+      console.warn("Serverul nu este accesibil. Se folosește stocarea locală.", error);
+      setContacts(loadLocalData());
+      setStorageMode('local');
+    } finally {
+      setIsConnecting(false);
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!isLoading) {
+    initializeApp();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && storageMode === 'local') {
       localStorage.setItem('contacts_backup', JSON.stringify(contacts));
     }
-  }, [contacts, isLoading]);
+  }, [contacts, isLoading, storageMode]);
 
   const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,9 +89,10 @@ const App: React.FC = () => {
           const savedContact = await response.json();
           setContacts(prev => [savedContact, ...prev]);
         } else {
-          throw new Error();
+          throw new Error('Eroare la salvarea în cloud');
         }
       } catch (error) {
+        alert("Eroare de conexiune la baza de date. Contactul va fi salvat doar local pentru moment.");
         setContacts(prev => [{ ...newContactData, id: tempId }, ...prev]);
       }
     } else {
@@ -105,6 +115,8 @@ const App: React.FC = () => {
 
         if (response.ok) {
           setContacts(prev => prev.filter(c => c.id !== contactToDelete.id));
+        } else {
+          throw new Error('Eroare la ștergere');
         }
       } catch (error) {
         setContacts(prev => prev.filter(c => c.id !== contactToDelete.id));
@@ -155,10 +167,23 @@ const App: React.FC = () => {
             <div>
               <h1 className="text-xl font-bold tracking-tight">SmartContact</h1>
               <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${storageMode === 'cloud' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                {isConnecting ? (
+                  <i className="fas fa-spinner fa-spin text-[10px] text-indigo-500"></i>
+                ) : (
+                  <span className={`w-2 h-2 rounded-full ${storageMode === 'cloud' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                )}
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  {storageMode === 'cloud' ? 'Sincronizat Cloud' : 'Stocare Locală'}
+                  {isConnecting ? 'Se conectează...' : storageMode === 'cloud' ? 'Sincronizat Cloud' : 'Stocare Locală (Offline)'}
                 </span>
+                {storageMode === 'local' && !isConnecting && (
+                  <button 
+                    onClick={initializeApp}
+                    className="ml-2 text-[10px] text-indigo-600 font-bold hover:underline"
+                    title="Încearcă din nou conectarea la MongoDB"
+                  >
+                    REÎNCEARCĂ
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -217,7 +242,7 @@ const App: React.FC = () => {
                   type="submit"
                   className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all"
                 >
-                  Salvează
+                  Salvează în {storageMode === 'cloud' ? 'Baza de Date' : 'Dispozitiv'}
                 </button>
               </form>
             </section>
@@ -262,7 +287,7 @@ const App: React.FC = () => {
             {isLoading ? (
               <div className="text-center py-12 text-slate-400">
                 <i className="fas fa-circle-notch fa-spin text-2xl mb-2"></i>
-                <p className="text-sm">Se încarcă...</p>
+                <p className="text-sm">Se sincronizează cu serverul...</p>
               </div>
             ) : filteredContacts.length > 0 ? (
               filteredContacts.map(contact => (
@@ -276,6 +301,11 @@ const App: React.FC = () => {
               <div className="text-center py-16 bg-white rounded-2xl border border-slate-100 text-slate-400">
                 <i className="fas fa-folder-open text-3xl mb-3 opacity-20"></i>
                 <p>Niciun contact găsit</p>
+                {storageMode === 'local' && (
+                  <p className="text-xs mt-2 text-amber-500 italic">
+                    Notă: Ești în modul local. Datele nu se vor vedea pe alte dispozitive.
+                  </p>
+                )}
               </div>
             )}
           </div>
