@@ -5,12 +5,19 @@
   "description": "Aplicatie gestionare contacte cu MongoDB",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "esbuild index.tsx --bundle --outfile=index.js --format=esm --jsx=automatic --external:react --external:react-dom --external:react-dom/client --external:@google/genai"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "express": "^4.18.2",
     "mongoose": "^7.5.0",
     "cors": "^2.8.5",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "esbuild": "^0.24.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }
